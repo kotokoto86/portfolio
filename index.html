@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Scripts &amp; Tools | Your Name</title>
+<title>Scripts &amp; Tools | こと</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Shippori+Mincho:wght@500;600;700&display=swap" rel="stylesheet">
@@ -401,8 +401,8 @@
     overscroll-behavior: contain;
   }
   dialog::backdrop { background: rgba(3, 10, 16, .84); }
-  dialog[open] { animation: rise .22s ease-out; }
-  @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  dialog[open] { animation: sheet-rise .22s ease-out; } /* 泡の「rise」と名前が重なると、泡の動きで開いてしまう */
+  @keyframes sheet-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
   @media (max-width: 640px) {
     dialog { width: 100%; height: 100%; max-height: 100%; border: 0; border-radius: 0; }
@@ -1086,10 +1086,10 @@
     <div class="hero-deep" id="hero-deep"></div>
     <div class="wrap hero-inner">
       <!-- 後で名前に差し替え -->
-      <span class="hero-name">Your Name</span>
+      <span class="hero-name">こと</span>
       <div class="hero-title" id="hero-title">
         <h1>Scripts &amp; Tools</h1>
-        <p>HoudiniとMayaの制作を、少しだけ軽くする道具たち</p>
+        <p>制作を楽にする道具たち</p>
         <span class="hero-scroll" aria-hidden="true">スクロールして潜る</span>
       </div>
     </div>
@@ -1111,7 +1111,7 @@
     <div class="wrap">
       <div class="topbar">
         <!-- 後で名前に差し替え -->
-        <span class="topbar-name">Your Name</span>
+        <span class="topbar-name">こと</span>
       </div>
       <section class="intro">
         <h1>Scripts &amp; Tools</h1>
@@ -1134,10 +1134,10 @@
 <!-- どちらの見せ方でも共通の下部 -->
 <div class="wrap shared-foot">
   <footer class="profile" id="profile">
-    <h2>プロフィール</h2>
+    <h2>こと</h2>
     <!-- 後でプロフィール文に差し替え -->
-    <p>ここにプロフィールが入ります。経歴、得意分野、連絡先などを記載してください。</p>
-    <small>&copy; <span id="year"></span> Your Name</small>
+    <p>https://x.com/koto_koto724</p>
+    <small>&copy; <span id="year"></span> こと</small>
   </footer>
 </div>
 
@@ -1292,7 +1292,7 @@ const TOOLS = [
     cardText: "マテリアルの作成・複製・インポートを1つのウィンドウで",
     summary: "マテリアルの作成・複製・インポートを単一ウィンドウに集約した、直感的なMaya用管理ツール。",
     thumb: "", gif: "", demo: "",
-    env: "", // 例："Houdini 20.5 / Python 3.11"（空欄なら表示されません）
+    env: "", // 例："Maya 2025 / Arnold 7 / Python 3.11"（空欄なら表示されません）
     demoNote: "1つのウィンドウから、オブジェクト・マテリアル・テクスチャをシームレスに選択・割り当てする様子",
     background: "Maya標準機能ではマテリアル作業のために複数のUIを行き来する必要があり、作業のテンポが損なわれていました。",
     effect: "選択対象に依存せず同じ操作感で扱えるため、UIの切り替えによるタイムロスがなくなり、直感的かつ高速なワークフローが実現しました。",
@@ -1319,7 +1319,7 @@ const TOOLS = [
     cardText: "エッジ数の違う面同士を、歪みを分散させて自動接続",
     summary: "エッジ数が異なる面同士を、歪みを分散させながら1回で自動接続するMaya用スマートブリッジツール。",
     thumb: "", gif: "", demo: "",
-    env: "", // 例："Houdini 20.5 / Python 3.11"（空欄なら表示されません）
+    env: "", // 例："Maya 2025 / Python 3.11"（空欄なら表示されません）
     demoNote: "エッジ数の違う2つの開口部を選択し、ワンクリックで綺麗にメッシュが結合される様子",
     background: "Mayaの標準Bridgeは両側のエッジ数が同数でないと機能せず、事前調整に手間がかかりました。また無理に繋ぐと片側に歪みが偏り、後から手動でねじれを直す作業が苦痛でした。",
     effect: "事前準備なしでそのまま繋げるようになり、モデリング効率が大きく向上しました。両側エッジを中間に寄せて均等リサンプルするため不自然な偏りが出ず、ねじれ補正や別メッシュの自動結合まで全自動化されました。",
@@ -1682,16 +1682,18 @@ document.addEventListener("focusin",  (e) => swapGif(e, true));
 document.addEventListener("focusout", (e) => swapGif(e, false));
 
 /* タッチ端末ではホバーできないため、画面に大きく映っているカードを本来の色に戻し、GIFがあれば再生する */
+let touchIO = null;
 function watchCardsOnTouch() {
   if (!matchMedia("(hover: none)").matches || !("IntersectionObserver" in window)) return;
-  const io = new IntersectionObserver((entries) => {
+  // 画面幅が変わって「潜って見る」を作り直したときも、新しいカードを見張れるように何度でも呼べる形にする
+  const io = touchIO || (touchIO = new IntersectionObserver((entries) => {
     entries.forEach(({ target, isIntersecting }) => {
       target.classList.toggle("is-inview", isIntersecting);
       const img = target.querySelector("img[data-gif]");
       if (img) img.src = isIntersecting ? img.dataset.gif : img.dataset.still;
     });
-  }, { threshold: 0.65 });
-  document.querySelectorAll(".card-link").forEach((link) => io.observe(link));
+  }, { threshold: 0.65 }));
+  document.querySelectorAll(".card-link:not([data-tw])").forEach((link) => { link.dataset.tw = "1"; io.observe(link); });
 }
 
 /* =========================================================
@@ -2039,7 +2041,7 @@ function makeBubbles() {
 }
 
 /* =========================================================
-   仕組みデモ（ivy_system / colormura_tool / auto_import / path_manager）
+   仕組みデモ（各ツールの sim。定義は SIM_DEFS を参照）
    元スクリプトの方式を、ブラウザの上で同じ考え方で組み直したもの。実際のツールの出力ではない。
    ・「潜って見る」ではスクロール量 p（0〜1）から絵を決める（scroll モード）
    ・詳細画面ではボタンで p を時間で動かす（manual モード）
@@ -2253,11 +2255,10 @@ function SimCore(def, els, mode, hooks = {}) {
       const th = S.shownStep >= i ? 0.34 : 0.40;   // しきい値の前後でちらつかない
       if (stepQ(p, i) >= th) { idx = i; break; }
     }
-    const reached = done.lastIndexOf(true);
     (els.stepBtns || []).forEach((b, i) => {
       b.dataset.done = String(done[i]);
       if (i === cur && !done[i]) b.setAttribute("aria-current", "step"); else b.removeAttribute("aria-current");
-      if (manual) b.disabled = !!S.anim || i > reached + 1;
+      // 手順ボタンはいつでも押せる（先の手順を押したら、そこまでの手順は済ませた状態から始める。動いている途中でも切り替えられる）
     });
     if (idx !== S.shownStep) {
       S.shownStep = idx;
@@ -3356,6 +3357,8 @@ function defArnold() {
   const setS = (el, o) => { const s = JSON.stringify(o); if (cache.get(el) === s) return; cache.set(el, s); Object.assign(el.style, o); };
   const setT = (el, t) => { if (el.textContent !== t) el.textContent = t; };
   const cls = (el, c, on) => { if (el.classList.contains(c) !== on) el.classList.toggle(c, on); };
+  // 図をタップして Y 反転を切り替えたときも、操作パネルのチェックボックスを同じ状態にそろえる
+  const syncFlipBox = () => { const box = root && root.closest(".sim") && root.closest(".sim").querySelector('[data-tog="flip"]'); if (box) box.checked = flipN; };
 
   function buildDom(stage) {
     root = document.createElement("div"); root.className = "am";
@@ -3431,10 +3434,10 @@ function defArnold() {
       ][i];
     },
     tap(x, y, w, h, api) {
-      flipN = !flipN;
+      flipN = !flipN; syncFlipBox();
       return flipN ? "Normal を DirectX 扱いにして、Y を反転しました。" : "Normal を OpenGL 扱いに戻して、Y の反転を外しました。";
     },
-    onLeaveHold() { flipN = false; },
+    onLeaveHold() { if (flipN) { flipN = false; syncFlipBox(); } },
     toggles: [{ id: "dup", label: "テクスチャノードを複製して貼り付け（共有しない）", on: false }, { id: "flip", label: "Normal（無印）を DirectX 扱いにする（Y反転）", on: false }],
     onToggle(id, on) { if (id === "dup") dup = on; if (id === "flip") flipN = on; },
     destroy() { root = null; },
@@ -3841,7 +3844,7 @@ function defTimeTo() {
         const sg = SEG[sel]; assign[sel] = hit.task; const msg = `${sg.app} の ${clock(sg.a)}〜${clock(sg.b)} を、${TASKS[hit.task].name} に割り当てました。`; sel = -1; return msg;
       }
       sel = sel === hit.i ? -1 : hit.i;
-      return sel < 0 ? "選びを外しました。" : `${SEG[hit.i].app} の ${clock(SEG[hit.i].a)}〜${clock(SEG[hit.i].b)} を選びました。入れるタスクを選んでください。`;
+      return sel < 0 ? "選択を外しました。" : `${SEG[hit.i].app} の ${clock(SEG[hit.i].a)}〜${clock(SEG[hit.i].b)} を選びました。入れるタスクを選んでください。`;
     },
     onLeaveHold() { sel = -1; SEG.forEach((s, i) => { assign[i] = s.app === "Houdini" ? 0 : s.app === "Maya" ? 1 : -1; }); },
     hint: { mouse: "時間の帯を選び、次にタスクを選ぶと、割り当てを入れ直せます。", touch: "時間の帯をタップし、次にタスクをタップすると、割り当てを入れ直せます。" },
@@ -4023,7 +4026,7 @@ let resizeTimer = 0;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
-    if ((canPin() ? "pin" : "inline") !== diveMode) { renderDive(); watchReveals(); syncSimSuspend(); }
+    if ((canPin() ? "pin" : "inline") !== diveMode) { renderDive(); watchReveals(); watchCardsOnTouch(); syncSimSuspend(); }
     else runScroll();
   }, 200);
 });
