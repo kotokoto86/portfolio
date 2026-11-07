@@ -937,7 +937,7 @@
   .dive-tool { display: grid; gap: 1.4rem 3rem; align-items: start; margin-bottom: clamp(4rem, 12vh, 8rem); }
   @media (min-width: 960px) {
     .dive-tool { grid-template-columns: minmax(0, 1fr) minmax(0, 1.9fr); }
-    .dive-tool-head { position: sticky; top: 5.5rem; }                 /* デモを見ている間も、名前と説明が左に残る */
+    /* ツールの名前と説明は、追従させず、置かれた位置のまま（スクロールに合わせて動かさない） */
   }
   .dive-tool-head h3 { margin: .9rem 0 0; font-size: clamp(1.7rem, 3.4vw, 2.6rem); line-height: 1.3; font-weight: 600; overflow-wrap: anywhere; }
   .dive-tool-head p { margin: 1rem 0 0; color: var(--mist); max-width: 28em; font-size: 1.05rem; }
@@ -3335,7 +3335,7 @@ function defAutoImport() {
 
 /* =========================================================
    Mismatch Bridge（uneven_bridge.py）
-   元の方式：両側の辺を面に沿って外側へ押し出す（押し出し量 = 2 つの穴の中心の距離 × 隙間比）
+   元の方式：両側の辺を面に沿って外側へ（辺ぜんたいで同じ向きに）押し出す（押し出し量 = 2 つの穴の中心の距離 × 隙間比）
             → 押し出した辺を「お互いのエッジ数の中間値」T = int((A + B) / 2 + 0.5) でリサンプル。増減は三角形で吸収（_zipper）
             → 数が揃った辺どうしをブリッジ（始点と向きは _align で合わせる）→ 元メッシュと結合して境界の頂点をマージ
    デモは開いた列だけ（閉じたループの巻き方向の扱いは、図にしていない）
@@ -3369,12 +3369,18 @@ function defBridge() {
   function loopData(pts, dir) {
     const n = pts.length, segs = n - 1, out = [];
     for (let i = 0; i < n; i++) out.push([dir, 0]);                // 面の外側 = 隙間のほうへ
-    for (let i = 0; i < n; i++) {                                  // 辺に垂直な方向を、隣り合う辺の平均に
+    // 押し出しの向きは、頂点ごとの法線ではなく、辺ぜんたいで 1 つにそろえる（各点の法線の平均）。
+    // 法線のままだと、カーブした辺では押し出し先が中央へすぼまり、ブリッジの両端が凹んで見える。
+    // 元のメッシュの格子も、辺を同じ向きに平行移動した形なので、新しい面はその続きとして並ぶ。
+    let ax = 0, ay = 0;
+    for (let i = 0; i < n; i++) {
       const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
       const tx = b[0] - a[0], ty = b[1] - a[1], l = Math.hypot(tx, ty) || 1;
       let nx = ty / l, ny = -tx / l; if (nx * dir < 0) { nx = -nx; ny = -ny; }
-      out[i] = [nx, ny];
+      ax += nx; ay += ny;
     }
+    const al = Math.hypot(ax, ay) || 1;
+    for (let i = 0; i < n; i++) out[i] = [ax / al, ay / al];
     const acc = [0]; for (let k = 0; k < segs; k++) acc.push(acc[k] + Math.hypot(pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]));
     return { P: pts, out, u: acc.map((a) => a / (acc[acc.length - 1] || 1)), segs };
   }
