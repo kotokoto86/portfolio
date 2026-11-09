@@ -743,6 +743,22 @@
     transform: translateY(14px);
     transition: opacity 1.2s ease, transform 1.4s cubic-bezier(.2, .7, .2, 1);
   }
+  html.intro-on #hero-fish { background: linear-gradient(to bottom, var(--foam) 62%, rgba(242, 248, 250, 0) 100%); }   /* スクリプトが描き始めるまでの和紙 */
+  /* 大見出しは、筆で書かれるように、左から右へにじみ出る */
+  @supports ((-webkit-mask-image: linear-gradient(#000, #000)) or (mask-image: linear-gradient(#000, #000))) {
+    html.intro-on .hero-title > h1 {
+      opacity: 1;
+      transform: none;
+      -webkit-mask-image: linear-gradient(90deg, #000 45%, transparent 55%);
+      mask-image: linear-gradient(90deg, #000 45%, transparent 55%);
+      -webkit-mask-size: 260% 100%;
+      mask-size: 260% 100%;
+      -webkit-mask-position: 100% 0;
+      mask-position: 100% 0;
+      transition: -webkit-mask-position 1.7s cubic-bezier(.22, 1, .36, 1), mask-position 1.7s cubic-bezier(.22, 1, .36, 1);
+    }
+    html.intro-on.intro-done .hero-title > h1 { -webkit-mask-position: 0 0; mask-position: 0 0; }
+  }
   html.intro-on .hero-title > p { transition-delay: .15s; }
   html.intro-on .hero-title > .hero-scroll { transition-delay: .45s; }
   html.intro-on.intro-done .hero-name, html.intro-on.intro-done .hero-title > * { opacity: 1; transform: none; }
@@ -2156,10 +2172,16 @@ window.addEventListener("scroll", () => {
 function heroFish() {
   const cv = $("#hero-fish");
   if (!cv) return;
-  const g = cv.getContext("2d");
+  let g = cv.getContext("2d");
+  const g0 = g;                                    // 池（いちばん下の層）
   const css = getComputedStyle(document.documentElement);
   const cssv = (n, fb) => css.getPropertyValue(n).trim() || fb;
-  const WHITE = cssv("--foam", "#f2f8fa"), NAVY = cssv("--trench", "#0c2435");
+  const WHITE = cssv("--foam", "#f2f8fa"), NAVY = cssv("--trench", "#0c2435"), SHALLOWS = cssv("--shallows", "#7fd6ec");
+  const rgba = (hex, a) => { const h = hex.replace("#", ""), n = parseInt(h.length === 3 ? h.replace(/./g, "$&$&") : h, 16); return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`; };
+  // 魚だけを描く層（粒子と揺れる光を、魚の上にだけ重ねるため）と、背景の水彩を一度だけ描いておく層
+  const layer = document.createElement("canvas"), lg = layer.getContext("2d");
+  const wash = document.createElement("canvas"), wg = wash.getContext("2d");
+  cv.style.background = "transparent";            // 最初の一瞬だけ CSS で敷いていた和紙は、ここからキャンバスが描く
   const T = 7.0;                                   // 止まるまでの秒数
   const SETTLE = T - 0.6;                          // タイトルを出し始める時刻
   const html = document.documentElement;
@@ -2189,6 +2211,72 @@ function heroFish() {
 
   let W = 0, H = 0, dpr = 1, M = [0, 0], S = 1, Lf = 1;
   let WEEDS = [], PADS = [], SPOTS = [], UNIT = 1;
+  const PAT = {};
+  function makeTextures() {
+    // コースティクス：水面で曲げられた光が、網目の明るい線になって水の中に落ちる（セルの境目ほど明るい）
+    const sz = 192, c = document.createElement("canvas"); c.width = c.height = sz;
+    const x = c.getContext("2d"), img = x.createImageData(sz, sz), rnd = makeRandom(5), P = [];
+    for (let i = 0; i < 14; i++) P.push([rnd() * sz, rnd() * sz]);
+    for (let y = 0; y < sz; y++) for (let xx = 0; xx < sz; xx++) {
+      let d1 = 1e9, d2 = 1e9;
+      for (const [px, py] of P) for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
+        const dx = xx - (px + ox * sz), dy = y - (py + oy * sz), d = dx * dx + dy * dy;
+        if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+      }
+      const a = Math.max(0, 1 - (Math.sqrt(d2) - Math.sqrt(d1)) / (sz * 0.03)), i4 = (y * sz + xx) * 4;
+      img.data[i4] = img.data[i4 + 1] = img.data[i4 + 2] = 255; img.data[i4 + 3] = Math.round(255 * Math.pow(a, 1.5));
+    }
+    x.putImageData(img, 0, 0);
+    PAT.caustic = lg.createPattern(c, "repeat");
+    // 顔料の粒：絵の具が紙のくぼみにたまってできる、細かいざらつき
+    const s2 = 128, c2 = document.createElement("canvas"); c2.width = c2.height = s2;
+    const x2 = c2.getContext("2d"), r2 = makeRandom(9);
+    for (let i = 0; i < 700; i++) {
+      x2.globalAlpha = 0.05 + 0.2 * r2(); x2.fillStyle = r2() < 0.8 ? NAVY : WHITE;
+      x2.beginPath(); x2.arc(r2() * s2, r2() * s2, 0.4 + 0.8 * r2(), 0, Math.PI * 2); x2.fill();
+    }
+    PAT.grain = lg.createPattern(c2, "repeat");
+  }
+  makeTextures();
+  // 背景の水彩：画面の隅に、ごく淡い色の溜まりを置く。中は薄く、縁ほど濃い（水彩の縁の濃色化）。1 つは、乾くときに水が戻ってできる輪（バックラン）も
+  function renderWash(wide) {
+    wash.width = cv.width; wash.height = cv.height;
+    wg.setTransform(dpr, 0, 0, dpr, 0, 0); wg.clearRect(0, 0, W, H);
+    const pools = wide
+      ? [[0.06, 0.04, 0.36, NAVY, 0.03, 1], [0.97, 0.8, 0.32, NAVY, 0.045, 0], [0.6, -0.05, 0.26, SHALLOWS, 0.1, 0], [0.99, 0.3, 0.18, SHALLOWS, 0.09, 0], [0.33, 0.36, 0.13, SHALLOWS, 0.06, 0]]
+      : [[0.08, 0.03, 0.42, NAVY, 0.03, 1], [0.96, 0.74, 0.38, NAVY, 0.045, 0], [0.72, -0.02, 0.32, SHALLOWS, 0.1, 0]];
+    const rnd = makeRandom(11);
+    const blob = (cx, cy, r, f) => {
+      wg.beginPath();
+      for (let i = 0; i <= 96; i++) {
+        const a = (i / 96) * Math.PI * 2, rr = r * (1 + 0.08 * Math.sin(2 * a + f[0]) + 0.05 * Math.sin(5 * a + f[1]) + 0.03 * Math.sin(11 * a + f[2]));
+        i ? wg.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr) : wg.moveTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+      }
+      wg.closePath();
+    };
+    pools.forEach(([px, py, pr, col, a, backrun]) => {
+      const cx = px * W, cy = py * H, r = pr * UNIT, f = [rnd() * 6, rnd() * 6, rnd() * 6];
+      wg.fillStyle = col; wg.strokeStyle = col;
+      wg.globalAlpha = a; blob(cx, cy, r, f); wg.fill();
+      // 縁の濃さは、場所ごとにゆっくり変える（顔料のたまり方にむらがあるので、輪の線には見せない）
+      const n = 96, rr = (q) => r * (1 + 0.08 * Math.sin(2 * q + f[0]) + 0.05 * Math.sin(5 * q + f[1]) + 0.03 * Math.sin(11 * q + f[2]));
+      for (let i = 0; i < n; i++) {
+        const q0 = (i / n) * Math.PI * 2, q1 = ((i + 1) / n) * Math.PI * 2;
+        const m = Math.max(0, Math.sin(1.7 * q0 + f[1]) * 0.6 + Math.sin(4.3 * q0 + f[2]) * 0.4);
+        if (m <= 0.02) continue;
+        wg.beginPath(); wg.moveTo(cx + Math.cos(q0) * rr(q0), cy + Math.sin(q0) * rr(q0)); wg.lineTo(cx + Math.cos(q1) * rr(q1), cy + Math.sin(q1) * rr(q1));
+        wg.globalAlpha = a * 0.6 * m; wg.lineWidth = 7; wg.stroke();     // 縁の手前に、少し濃い帯
+        wg.globalAlpha = a * 2.4 * m; wg.lineWidth = 1.4; wg.stroke();   // 縁そのものは、いちばん濃い
+      }
+      if (backrun) {
+        const f2 = [rnd() * 6, rnd() * 6, rnd() * 6], bx = cx + r * 0.25, by = cy + r * 0.3;
+        wg.globalCompositeOperation = "destination-out"; wg.globalAlpha = 0.55; blob(bx, by, r * 0.38, f2); wg.fill();
+        wg.globalCompositeOperation = "source-over"; wg.globalAlpha = a * 2; wg.lineWidth = 1.2; wg.stroke();
+      }
+    });
+    wg.globalCompositeOperation = "source-atop"; wg.globalAlpha = 0.7; wg.fillStyle = PAT.grain; wg.fillRect(0, 0, W, H);
+    wg.globalCompositeOperation = "source-over"; wg.globalAlpha = 1;
+  }
 
   function layoutScene(wide) {
     const rnd = makeRandom(7);
@@ -2319,6 +2407,8 @@ function heroFish() {
     FISH[0].path = buildPath(A, [A_END[0] * S, A_END[1] * S]);
     FISH[1].path = buildPath(B, [-A_END[0] * S, -A_END[1] * S]);
     layoutScene(wide);
+    layer.width = cv.width; layer.height = cv.height;
+    renderWash(wide);
     return true;
   }
 
@@ -2335,17 +2425,21 @@ function heroFish() {
     g.quadraticCurveTo(...add(add(base, dir, len * 0.5), side, -wid * 0.35), base[0], base[1]);
   }
 
-  function drawWeeds(t) {                                           // 水草：ねじれながら揺れる、細長いリボン
+  function drawWeeds(t, bodies) {                                   // 水草：ねじれながら揺れる、細長いリボン。魚がそばを通ると、よけるようにしなる
     g.fillStyle = NAVY;
+    const PR = S * 0.3;
     WEEDS.forEach((wd) => {
       const n = 22, left = [], right = [];
       let prev = null;
       for (let k = 0; k <= n; k++) {
         const v = k / n;
-        const x = wd.x + wd.lean * wd.len * Math.pow(v, 1.5)
+        let x = wd.x + wd.lean * wd.len * Math.pow(v, 1.5)
           + wd.curl * wd.len * v * v * (1 - v) * 1.8                   // 途中でしなって、先が戻る
           + wd.sway * v * v * Math.sin(0.45 * t + wd.ph + v * 2.2);
         const y = H + 8 - wd.len * v;
+        let push = 0;
+        for (const b of bodies) { const dx = x - b[0], d = Math.hypot(dx, y - b[1]); if (d < PR) push += Math.sign(dx || 1) * Math.pow(1 - d / PR, 2); }
+        x += push * UNIT * 0.05 * v;
         const pt = [x, y];
         const d = prev ? unit([pt[0] - prev[0], pt[1] - prev[1]]) : [0, -1];
         const nn = [-d[1], d[0]];
@@ -2454,7 +2548,9 @@ function heroFish() {
     g.closePath(); g.fill();
   }
 
-  function drawFish(f, t) {
+  let BOX = [0, 0, 0, 0];
+  const boxAdd = (p) => { if (p[0] < BOX[0]) BOX[0] = p[0]; if (p[1] < BOX[1]) BOX[1] = p[1]; if (p[0] > BOX[2]) BOX[2] = p[0]; if (p[1] > BOX[3]) BOX[3] = p[1]; };
+  function drawFish(f, t, mode) {
     const rest = smooth((t - (T - 0.6)) / 1.4);
     const sH = f.frac(t) * f.path.L;
     const vn = f.vnAt(t), act = f.actAt(t), brake = f.brakeAt(t), phase = f.phAt(t), turn = turnRate(f, t);
@@ -2496,8 +2592,18 @@ function heroFish() {
       for (let i = nT; i > 0; i--) g.quadraticCurveTo(dn[i][0], dn[i][1], (dn[i][0] + dn[i - 1][0]) / 2, (dn[i][1] + dn[i - 1][1]) / 2);
       g.closePath();
     };
+    if (mode === "shadow") {                                        // 水底に落ちる影：体と尾の形を、淡く、少し大きく、ぼかして
+      g.fillStyle = NAVY;
+      [[1.24, 0.026], [1.1, 0.036]].forEach(([sc, a]) => { g.globalAlpha = a; bodyPath(pts, nrm, wid, () => sc); g.fill(); fanPath(sc * 0.95); g.fill(); });
+      g.globalAlpha = 1;
+      return sH;
+    }
+    pts.forEach(boxAdd); tc.forEach(boxAdd);
     g.fillStyle = ink ? NAVY : WHITE;
     g.globalAlpha = ink ? 0.17 : 0.62; fanPath(1); g.fill();
+    // 尾の縁は、水彩のように少し濃く（白い魚は、水の色が縁にたまる）
+    g.strokeStyle = ink ? NAVY : SHALLOWS; g.globalAlpha = ink ? 0.3 : 0.5; g.lineWidth = Math.max(1, Lf * 0.007); g.stroke();
+    g.fillStyle = ink ? NAVY : WHITE;
     if (ink) { g.globalAlpha = 0.2; fanPath(0.5); g.fill(); }       // 根元ほど濃く、先は透ける
     g.fillStyle = NAVY; g.globalAlpha = ink ? 0.38 : 0.28;           // 尾の筋
     [-0.86, -0.52, -0.2, 0.2, 0.52, 0.86].forEach((c) => {
@@ -2521,12 +2627,13 @@ function heroFish() {
       [1, -1].forEach((side) => leaf(add(pts[k], nrm[k], wid[k] * 0.8 * side), rot(td, -side * (spread + scull * sk * side)), len, w * side));
     });
     g.fill();
-    if (!ink) { g.strokeStyle = NAVY; g.globalAlpha = 0.4; g.lineWidth = Math.max(0.8, Lf * 0.004); g.stroke(); }
+    g.strokeStyle = NAVY; g.globalAlpha = ink ? 0.34 : 0.4; g.lineWidth = Math.max(0.8, Lf * (ink ? 0.005 : 0.004)); g.stroke();   // ひれの縁も、少し濃く
 
     if (ink) {
       // ---- 墨の魚：縁はにじんで淡く、背筋と頭ほど濃い。体に沿って、かすれの筋 ----
       g.fillStyle = NAVY;
       [[1.12, 0.07], [1.05, 0.12], [1.0, 0.28]].forEach(([sc, a]) => { g.globalAlpha = a; bodyPath(pts, nrm, wid, () => sc); g.fill(); });
+      g.strokeStyle = NAVY; g.globalAlpha = 0.2; g.lineWidth = Math.max(1, Lf * 0.008); g.stroke();   // にじみの縁に、墨がたまる
       g.globalAlpha = 0.34; bodyPath(pts, nrm, wid, (k) => 0.7 * (1 - 0.25 * (k / (K - 1)))); g.fill();
       g.globalAlpha = 0.42; bodyPath(pts, nrm, wid, (k) => 0.36 * (1 - 0.6 * (k / (K - 1)))); g.fill();
       const kh = Math.round(0.22 * (K - 1));                         // 頭は濃墨
@@ -2568,20 +2675,93 @@ function heroFish() {
     return sH;
   }
 
-  function draw(t) {
+  // 魚の層に、顔料の粒と、水面から揺れて差す光の網を、魚の上にだけ重ねる
+  function texturize(t) {
+    if (!(BOX[2] > BOX[0])) return;
+    const pad = Lf * 0.6, x0 = Math.max(0, BOX[0] - pad), y0 = Math.max(0, BOX[1] - pad), x1 = Math.min(W, BOX[2] + pad), y1 = Math.min(H, BOX[3] + pad);
+    lg.globalCompositeOperation = "source-atop";
+    lg.globalAlpha = 0.34; lg.fillStyle = PAT.grain; lg.fillRect(x0, y0, x1 - x0, y1 - y0);
+    const bs = Math.max(0.6, Lf / 190);
+    [[0.3, 1, 9, 5], [0.2, 1.7, -6, 7]].forEach(([a, sc, vx, vy]) => {
+      const ox = t * vx, oy = t * vy, k = bs * sc;
+      lg.save(); lg.translate(ox, oy); lg.scale(k, k);
+      lg.globalAlpha = a; lg.fillStyle = PAT.caustic; lg.fillRect((x0 - ox) / k, (y0 - oy) / k, (x1 - x0) / k, (y1 - y0) / k);
+      lg.restore();
+    });
+    lg.globalCompositeOperation = "source-over"; lg.globalAlpha = 1;
+  }
+  // タップした所に広がる、筆の波紋
+  const TAPS = [];
+  function drawTaps(t) {
+    for (let i = TAPS.length - 1; i >= 0; i--) {
+      const tp = TAPS[i], k = (t - tp.t) / 2.6;
+      if (k >= 1) { TAPS.splice(i, 1); continue; }
+      [0, 0.18].forEach((d, j) => {
+        const kk = (k - d) / (1 - d);
+        if (kk <= 0) return;
+        brushRing(tp.x, tp.y, UNIT * (0.01 + 0.12 * (1 - Math.pow(1 - kk, 3))) * (j ? 0.65 : 1), Math.max(1.4, UNIT * 0.006) * (1 - kk * 0.5), NAVY, 0.3 * Math.pow(1 - kk, 1.6), tp.ph + j);
+      });
+    }
+  }
+  // 始まり：淡い和紙の白から、出会う点のあたりを中心に水彩のにじみが広がって、池が現れる。にじみの先は濃くなる
+  const REVEAL = 1.8;
+  function drawReveal(t) {
+    if (still || t >= REVEAL) return;
+    const k = clamp(t / REVEAL), e = 1 - Math.pow(1 - k, 2.6);
+    const cx = M[0] - S * 0.15, cy = M[1] + S * 0.1;
+    const r = Math.hypot(Math.max(cx, W - cx), Math.max(cy, H - cy)) * 1.12 * e;
+    const blob = (c, sc) => {
+      c.beginPath();
+      for (let i = 0; i <= 96; i++) {
+        const a = (i / 96) * Math.PI * 2, rr = r * sc * (1 + 0.07 * Math.sin(3 * a + 0.7) + 0.04 * Math.sin(7 * a + 2.1) + 0.022 * Math.sin(13 * a + 4.2));
+        i ? c.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr) : c.moveTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+      }
+      c.closePath();
+    };
+    lg.setTransform(dpr, 0, 0, dpr, 0, 0); lg.globalCompositeOperation = "source-over"; lg.globalAlpha = 1;
+    lg.clearRect(0, 0, W, H);
+    const grd = lg.createLinearGradient(0, 0, 0, H);                 // 和紙は下へいくほど薄く（深みとの境目は出さない）
+    grd.addColorStop(0, WHITE); grd.addColorStop(0.62, WHITE); grd.addColorStop(1, rgba(WHITE, 0));
+    lg.fillStyle = grd; lg.fillRect(0, 0, W, H);
+    lg.globalCompositeOperation = "destination-out";
+    [[1.08, 0.25], [1.04, 0.5], [1.0, 1]].forEach(([sc, a]) => { lg.globalAlpha = a; blob(lg, sc); lg.fill(); });
+    lg.globalCompositeOperation = "source-over"; lg.globalAlpha = 1;
+    g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1 - smooth((k - 0.82) / 0.18); g.drawImage(layer, 0, 0);
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.clearRect(0, 0, W, H);
+    g.strokeStyle = NAVY; g.lineWidth = Math.max(1.2, UNIT * 0.004); g.globalAlpha = 0.16 * (1 - k);
+    blob(g, 1); g.stroke(); g.globalAlpha = 1;
+  }
+
+  function draw(t) {
+    g = g0;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, cv.width, cv.height);
+    g.drawImage(wash, 0, 0);                                         // 背景の水彩
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
     const heads = FISH.map((f) => f.frac(t) * f.path.L);
-    drawWeeds(t);
+    // 水底の影：光は左上から。魚が水底から浮いて見え、水の深さが出る
+    FISH.forEach((f) => { g.save(); g.translate(S * 0.05, S * 0.085); drawFish(f, t, "shadow"); g.restore(); });
+    const bodies = [];
+    FISH.forEach((f, i) => [0, 0.45, 0.9].forEach((u) => { const b = at(f.path, heads[i] - u * Lf); bodies.push([b.x, b.y]); }));
+    drawWeeds(t, bodies);
     FISH.forEach((f, i) => drawTrail(f, heads[i], t));
     // 止まった瞬間に、出会った所から一度だけ広がる輪
     const k = (t - (T - 0.2)) / 2.0;
     if (k > 0 && k < 1) {
       brushRing(M[0], M[1], S * (0.16 + 0.9 * (1 - Math.pow(1 - k, 3))), Math.max(1.6, S * 0.012) * (1 - k * 0.4), WHITE, 0.55 * Math.pow(1 - k, 1.5), 0.6);
     }
+    // 魚は別の層に描き、質感をのせてから池に置く
+    g = lg;
+    lg.setTransform(dpr, 0, 0, dpr, 0, 0); lg.clearRect(0, 0, W, H);
+    BOX = [Infinity, Infinity, -Infinity, -Infinity];
     FISH.slice().reverse().forEach((f) => drawFish(f, t));
+    texturize(t);
+    g = g0;
+    g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(layer, 0, 0); g.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawPads(t);
     drawRipples(t);
+    drawTaps(t);
+    drawReveal(t);
     if (t >= SETTLE) showTitle();
   }
 
@@ -2603,6 +2783,15 @@ function heroFish() {
     new IntersectionObserver((es) => { visible = es[0].isIntersecting; if (visible) kick(); }).observe($("#hero"));
   }
   document.addEventListener("visibilitychange", kick);
+  // 水面をタップすると、筆の波紋が広がる（リンクやボタンの上は除く）
+  $("#hero").addEventListener("pointerdown", (e) => {
+    if (REDUCED.matches || (e.target.closest && e.target.closest("a, button"))) return;
+    const r = cv.getBoundingClientRect();
+    if (!r.width) return;
+    TAPS.push({ x: (e.clientX - r.left) * (W / r.width), y: (e.clientY - r.top) * (H / r.height), t: (performance.now() - t0) / 1000, ph: Math.random() * 6 });
+    if (TAPS.length > 5) TAPS.shift();
+    kick();
+  });
 }
 
 /* --- 演出版：最初の画面の和紙。紙の繊維を 1 枚だけ描いて、敷き詰める（継ぎ目が出ないよう、端をまたぐ繊維は反対側にも描く） --- */
